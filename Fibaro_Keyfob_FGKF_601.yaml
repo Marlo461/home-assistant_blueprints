@@ -1,14 +1,15 @@
 blueprint:
   name: Fibaro Keyfob FGKF-601 events all button
-  description: 'Perform actions with Fibaro Keyfob FGKF601.
-It works
-1x press
-2x press
-3x press
-Hold
-Release (The release always starts after the hold action)
-Only one press works in the factory setting in the Fibaro Keyfob
-Enable pressing 2x and 3x must be changed parameters 21 to 26 to value 15 in the Fibaro Keyfob configuration.'
+  description: |
+    Perform actions with Fibaro Keyfob FGKF601.
+    It works
+    1x press
+    2x press
+    3x press
+    Hold
+    Release (The release always starts after the hold action)
+    Only one press works in the factory setting in the Fibaro Keyfob
+    Enable pressing 2x and 3x must be changed parameters 21 to 26 to value 15 in the Fibaro Keyfob configuration.
   source_url: https://github.com/Marlo461/home-assistant_blueprints/blob/main/Fibaro_Keyfob_FGKF_601.yaml
   domain: automation
   input:
@@ -22,157 +23,157 @@ Enable pressing 2x and 3x must be changed parameters 21 to 26 to value 15 in the
           model: FGKF601
 # Square button
     tap_top_left_actions:
-      name: 1x Press Square \# button Actions
+      name: '1x Press Square # button'
       selector:
         action:
       default: []
     2x_tap_top_left_actions:
-      name: 2x Press Square \# button Actions
+      name: '2x Press Square # button'
       selector:
         action:
       default: []
     3x_tap_top_left_actions:
-      name: 3x Press Square \# button Actions
+      name: '3x Press Square # button'
       selector:
         action:
       default: []
     hold_top_left_actions:
-      name: Hold Square \# button Actions
+      name: 'Hold Square # button'
       selector:
         action:
       default: []
     release_top_left_actions:
-      name: Release Square \# button Actions
+      name: 'Release Square # button'
       selector:
         action:
       default: []
 # Circle button
     tap_top_right_actions:
-      name: Press Circle O button Actions
+      name: 1x Press Circle O button
       selector:
         action:
       default: []
     2x_tap_top_right_actions:
-      name: 2x Press Circle O button Actions
+      name: 2x Press Circle O button
       selector:
         action:
       default: []
     3x_tap_top_right_actions:
-      name: 3x Press Circle O button Actions
+      name: 3x Press Circle O button
       selector:
         action:
       default: []
     hold_top_right_actions:
-      name: Hold Circle O button Actions
+      name: Hold Circle O button
       selector:
         action:
       default: []
     release_top_right_actions:
-      name: Release Circle O button Actions
+      name: Release Circle O button
       selector:
         action:
       default: []
 # Cross button
     tap_middle_left_actions:
-      name: Press Cross X button Actions
+      name: 1x Press Cross X button
       selector:
         action:
       default: []
     2x_tap_middle_left_actions:
-      name: 2x Press Cross X button Actions
+      name: 2x Press Cross X button
       selector:
         action:
       default: []
     3x_tap_middle_left_actions:
-      name: 3x Press Cross X button Actions
+      name: 3x Press Cross X button
       selector:
         action:
       default: []
     hold_middle_left_actions:
-      name: Hold Cross X button Actions
+      name: Hold Cross X button
       selector:
         action:
       default: []
     release_middle_left_actions:
-      name: Release Cross X button Actions
+      name: Release Cross X button
       selector:
         action:
       default: []
 # Triangle button
     tap_middle_right_actions:
-      name: Press Triangle ^ button  Actions
+      name: 1x Press Triangle ^ button
       selector:
         action:
       default: []
     2x_tap_middle_right_actions:
-      name: 2x Press Triangle ^ button  Actions
+      name: 2x Press Triangle ^ button
       selector:
         action:
       default: []
     3x_tap_middle_right_actions:
-      name: 3x Press Triangle ^ button  Actions
+      name: 3x Press Triangle ^ button
       selector:
         action:
       default: []
     hold_middle_right_actions:
-      name: Hold Triangle ^ button  Actions
+      name: Hold Triangle ^ button 
       selector:
         action:
       default: []
     release_middle_right_actions:
-      name: Release Triangle ^ button  Actions
+      name: Release Triangle ^ button
       selector:
         action:
       default: []
 # Minus button
     tap_bottom_left_actions:
-      name: Press Minus \- button Actions
+      name: '1x Press Minus - button'
       selector:
         action:
       default: []
     2x_tap_bottom_left_actions:
-      name: 2x Press Minus \- button Actions
+      name: '2x Press Minus - button'
       selector:
         action:
       default: []
     3x_tap_bottom_left_actions:
-      name: 3x Press Minus \- button Actions
+      name: '3x Press Minus - button'
       selector:
         action:
       default: []
     hold_bottom_left_actions:
-      name: Hold Minus \- button Actions
+      name: 'Hold Minus - button'
       selector:
         action:
       default: []
     release_bottom_left_actions:
-      name: Release Minus \- button Actions
+      name: 'Release Minus - button'
       selector:
         action:
       default: []
 # Plus button
     tap_bottom_right_actions:
-      name: Press Plus + button  Actions
+      name: 1x Press Plus + button
       selector:
         action:
       default: []
     2x_tap_bottom_right_actions:
-      name: 2x Press Plus + button  Actions
+      name: 2x Press Plus + button
       selector:
         action:
       default: []
     3x_tap_bottom_right_actions:
-      name: 3x Press Plus + button  Actions
+      name: 3x Press Plus + button
       selector:
         action:
       default: []
     hold_bottom_right_actions:
-      name: Hold Plus + button  Actions
+      name: Hold Plus + button
       selector:
         action:
       default: []
     release_bottom_right_actions:
-      name: Release Plus + button  Actions
+      name: Release Plus + button
       selector:
         action:
       default: []
@@ -190,8 +191,7 @@ action:
     - condition: template
       value_template: '{{ trigger.event.data.device_id == zwavejs_device }}'
     - condition: template
-      value_template: '{{ trigger.event.data.command_class_name == ''Central Scene''
-        }}'
+      value_template: '{{ trigger.event.data.command_class_name == ''Central Scene'' }}'
     sequence:
     - choose:
 # Square button
@@ -356,7 +356,8 @@ action:
         data:
           level: debug
           logger: '{{ logger }}'
-          message: Activated scene '{{ trigger.event.data.label }}' with value '{{
+          message: |
+            Activated scene '{{ trigger.event.data.label }}' with value '{{
             trigger.event.data.value }}' for node '{{ zwavejs_device }}' ({{ trigger.event.data.node_id
             }})
   default: []
