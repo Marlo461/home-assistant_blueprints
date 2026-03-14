@@ -1,0 +1,70 @@
+blueprint:
+  name: Dynamická teplota LED (6500K -> 2000K)
+  description: Lineárne mení teplotu farby svetla počas dňa od 05:00 do 24:00.
+  domain: automation
+  input:
+    target_light_entity:
+      name: LED Svetlo
+      description: Vyberte svetlo, ktoré chcete ovládať.
+      selector:
+        entity:
+          domain: light
+    update_interval:
+      name: Interval aktualizácie (minúty)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: min
+
+mode: restart
+
+trigger:
+  # Pravidelný časový pulz
+  - platform: time_pattern
+    minutes: "/5" # Spúšťa sa každých 5 minút (môžeš zmeniť na !input ak chceš dynamiku)
+  # Spustenie pri zapnutí svetla, aby hneď naskočila správna farba
+  - platform: state
+    entity_id: !input target_light_entity
+    from: "off"
+    to: "on"
+
+condition:
+  # Beží len v definovanom okne 05:00 - 00:00
+  - condition: time
+    after: "05:00:00"
+    before: "00:00:00"
+  # Len ak je svetlo reálne zapnuté
+  - condition: state
+    entity_id: !input target_light_entity
+    state: "on"
+
+action:
+  - variables:
+      # Nastavenia pre výpočet (PLC štýl konštánt)
+      start_min: 300    # 5:00
+      end_min: 1440     # 24:00
+      start_k: 6500
+      end_k: 2000
+      
+      # Aktuálny čas v minútach od polnoci
+      current_min: "{{ now().hour * 60 + now().minute }}"
+      
+      # Výpočet Kelvinov (lineárna interpolácia)
+      # y = 6500 + (current_min - 300) * (2000 - 6500) / (1440 - 300)
+      calculated_kelvin: >
+        {% if current_min <= start_min %}
+          {{ start_k }}
+        {% elif current_min >= end_min %}
+          {{ end_k }}
+        {% else %}
+          {{ (start_k + (current_min - start_min) * (end_k - start_k) / (end_min - start_min)) | int }}
+        {% endif %}
+
+  - action: light.turn_on
+    target:
+      entity_id: !input target_light_entity
+    data:
+      color_temp_kelvin: "{{ calculated_kelvin }}"
+      transition: 10
