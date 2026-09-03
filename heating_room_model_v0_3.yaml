@@ -1,0 +1,580 @@
+blueprint:
+  name: "Kúrenie – model miestnosti v0.3"
+  description: >-
+    Automation blueprint pre jednu vykurovaciu miestnosť/zónu.
+    Počíta potrebu tepla 0–100 % z climate entity a otvorenia TRV.
+    Voliteľne používa externý izbový snímač, okná, trend teploty a teploty
+    prívodu/spiatočky. Pri vhodných stabilných podmienkach sa každých 5 minút
+    pomaly učí tepelný koeficient miestnosti W/K z reálneho výkonu radiátora.
+    Kotol priamo neovláda.
+
+    Výsledky sa ukladajú do 4 input_number helperov:
+    potreba tepla, naučené W/K, dôvera modelu a potrebná teplota prívodu.
+  domain: automation
+  homeassistant:
+    min_version: "2026.8.0"
+
+  input:
+    room:
+      name: "1. Miestnosť"
+      icon: mdi:home-thermometer
+      collapsed: false
+      input:
+        room_label:
+          name: Názov miestnosti
+          default: Miestnosť
+          selector:
+            text:
+
+        thermostat_entity:
+          name: Termostat / TRV climate
+          description: Číta sa setpoint, current_temperature a HVAC režim.
+          selector:
+            entity:
+              filter:
+                - domain: climate
+
+        room_temperature_entity:
+          name: Externá izbová teplota
+          description: Voliteľné. Ak nie je zadaná, použije sa current_temperature z climate entity.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+
+        valve_position_entities:
+          name: Poloha ventilov TRV
+          description: Vyber jeden alebo viac LEVEL / Valve opening senzorov v miestnosti.
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+              multiple: true
+
+        valve_value_multiplier:
+          name: Násobiteľ hodnoty ventilu
+          description: 1 pre senzory 0–100 %, 100 pre senzory 0.00–1.00.
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              mode: box
+
+        outside_temperature_entity:
+          name: Vonkajšia teplota
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+
+        window_entities:
+          name: Okná / dvere
+          description: Voliteľné. Pri otvorenom kontakte je potreba tepla 0 % a učenie W/K sa zablokuje.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: binary_sensor
+              multiple: true
+
+    radiator:
+      name: "2. Radiátor"
+      icon: mdi:radiator
+      collapsed: false
+      input:
+        radiator_nominal_output_w:
+          name: Menovitý výkon radiátora/ov
+          description: Súčet výkonov radiátorov v miestnosti pri referenčnom spáde.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 10000
+              step: 1
+              unit_of_measurement: W
+              mode: box
+
+        radiator_reference_supply_c:
+          name: Referenčný prívod
+          default: 70
+          selector:
+            number:
+              min: 30
+              max: 90
+              step: 1
+              unit_of_measurement: "°C"
+              mode: box
+
+        radiator_reference_return_c:
+          name: Referenčná spiatočka
+          default: 55
+          selector:
+            number:
+              min: 20
+              max: 80
+              step: 1
+              unit_of_measurement: "°C"
+              mode: box
+
+        radiator_reference_room_c:
+          name: Referenčná izbová teplota
+          default: 20
+          selector:
+            number:
+              min: 10
+              max: 30
+              step: 0.5
+              unit_of_measurement: "°C"
+              mode: box
+
+        radiator_exponent_n:
+          name: Exponent radiátora n
+          default: 1.30
+          selector:
+            number:
+              min: 1.0
+              max: 1.6
+              step: 0.01
+              mode: box
+
+        assumed_water_delta_t_c:
+          name: Predpokladaný rozdiel prívod – spiatočka
+          description: Používa sa pri spätnom výpočte potrebnej teploty prívodu.
+          default: 10
+          selector:
+            number:
+              min: 3
+              max: 25
+              step: 1
+              unit_of_measurement: K
+              mode: box
+
+    physics:
+      name: "3. Fyzikálny model / učenie"
+      icon: mdi:chart-bell-curve
+      collapsed: true
+      input:
+        supply_temperature_entity:
+          name: Teplota prívodu
+          description: Voliteľné. Neskôr doplníme z EMS-ESP.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+
+        return_temperature_entity:
+          name: Teplota spiatočky
+          description: Voliteľné. Neskôr doplníme z EMS-ESP.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+
+        room_temperature_trend_entity:
+          name: Trend izbovej teploty °C/h
+          description: Voliteľné. Ak nie je zadaný, trend nebude podmienkou učenia.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+
+        valve_learning_threshold_pct:
+          name: Minimálne otvorenie všetkých TRV pre učenie
+          default: 85
+          selector:
+            number:
+              min: 60
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: box
+
+        stable_room_trend_c_per_h:
+          name: Maximálny absolútny trend pre učenie
+          default: 0.10
+          selector:
+            number:
+              min: 0.02
+              max: 0.50
+              step: 0.01
+              unit_of_measurement: "°C/h"
+              mode: box
+
+        min_inside_outside_delta_c:
+          name: Minimálny rozdiel vnútri – vonku
+          default: 10
+          selector:
+            number:
+              min: 3
+              max: 25
+              step: 1
+              unit_of_measurement: K
+              mode: box
+
+        learning_alpha:
+          name: Rýchlosť učenia W/K
+          description: 0.05 = 5 % nová kvalitná vzorka + 95 % starý model.
+          default: 0.05
+          selector:
+            number:
+              min: 0.01
+              max: 0.30
+              step: 0.01
+              mode: box
+
+        confidence_step:
+          name: Prírastok dôvery za kvalitnú 5-minútovú vzorku
+          default: 0.5
+          selector:
+            number:
+              min: 0.1
+              max: 5
+              step: 0.1
+              unit_of_measurement: "%"
+              mode: box
+
+        night_learning_only:
+          name: Učiť W/K iba v noci
+          description: Odporúčané – obmedzí vplyv solárnych ziskov.
+          default: true
+          selector:
+            boolean:
+
+        recovery_boost_per_c:
+          name: Rezerva výkonu pri nedokúrenej miestnosti
+          description: Dodatočný násobok výkonu na každý 1 °C pod setpointom.
+          default: 0.15
+          selector:
+            number:
+              min: 0
+              max: 0.50
+              step: 0.01
+              mode: box
+
+        max_recovery_boost:
+          name: Maximálna rezerva výkonu
+          default: 0.35
+          selector:
+            number:
+              min: 0
+              max: 1.0
+              step: 0.05
+              mode: box
+
+    priority:
+      name: "4. Priorita miestnosti"
+      icon: mdi:priority-high
+      collapsed: true
+      input:
+        room_weight:
+          name: Váha miestnosti
+          description: 1.0 = normálna. Ovplyvňuje výslednú potrebu tepla.
+          default: 1.0
+          selector:
+            number:
+              min: 0.1
+              max: 2.0
+              step: 0.1
+              mode: box
+
+    outputs:
+      name: "5. Výstupné helpery"
+      icon: mdi:database-export
+      collapsed: false
+      input:
+        heat_need_helper:
+          name: Helper – potreba tepla 0–100 %
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+
+        heat_loss_wk_helper:
+          name: Helper – naučená tepelná strata W/K
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+
+        confidence_helper:
+          name: Helper – dôvera modelu 0–100 %
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+
+        required_supply_helper:
+          name: Helper – potrebná teplota prívodu °C
+          selector:
+            entity:
+              filter:
+                - domain: input_number
+
+variables:
+  room_label: !input room_label
+  thermostat_entity: !input thermostat_entity
+  room_temperature_entity: !input room_temperature_entity
+  valve_entities: !input valve_position_entities
+  valve_multiplier: !input valve_value_multiplier
+  outside_entity: !input outside_temperature_entity
+  window_entities: !input window_entities
+
+  radiator_qn: !input radiator_nominal_output_w
+  ref_supply: !input radiator_reference_supply_c
+  ref_return: !input radiator_reference_return_c
+  ref_room: !input radiator_reference_room_c
+  radiator_n: !input radiator_exponent_n
+  assumed_water_dt: !input assumed_water_delta_t_c
+
+  supply_entity: !input supply_temperature_entity
+  return_entity: !input return_temperature_entity
+  trend_entity: !input room_temperature_trend_entity
+  valve_learning_threshold: !input valve_learning_threshold_pct
+  stable_trend_limit: !input stable_room_trend_c_per_h
+  min_io_delta: !input min_inside_outside_delta_c
+  learning_alpha: !input learning_alpha
+  confidence_step: !input confidence_step
+  night_only: !input night_learning_only
+  recovery_boost_per_c: !input recovery_boost_per_c
+  max_recovery_boost: !input max_recovery_boost
+  room_weight: !input room_weight
+
+  wk_helper: !input heat_loss_wk_helper
+  confidence_helper_entity: !input confidence_helper
+
+triggers:
+  - trigger: state
+    entity_id: !input thermostat_entity
+    id: thermostat
+
+  - trigger: state
+    entity_id: !input valve_position_entities
+    id: valve
+
+  - trigger: state
+    entity_id: !input outside_temperature_entity
+    id: outside
+
+  - trigger: time_pattern
+    minutes: "/5"
+    id: periodic
+
+conditions: []
+
+actions:
+  # 1) Základné vstupné hodnoty
+  - variables:
+      hvac_mode: "{{ states(thermostat_entity) }}"
+      room_temp: >-
+        {% if room_temperature_entity not in ['', none] and has_value(room_temperature_entity) %}
+          {{ states(room_temperature_entity) | float(0) }}
+        {% else %}
+          {{ state_attr(thermostat_entity, 'current_temperature') | float(0) }}
+        {% endif %}
+      target_temp: "{{ state_attr(thermostat_entity, 'temperature') | float(0) }}"
+      outside_temp: "{{ states(outside_entity) | float(0) }}"
+      old_wk: "{{ states(wk_helper) | float(0) }}"
+      old_confidence: "{{ states(confidence_helper_entity) | float(0) }}"
+
+  # 2) TRV a okná
+  - variables:
+      valve_avg: >-
+        {% set ns = namespace(sum=0.0, count=0) %}
+        {% for e in expand(valve_entities) %}
+          {% if e.state not in ['unknown', 'unavailable', 'none', ''] %}
+            {% set ns.sum = ns.sum + ((e.state | float(0)) * (valve_multiplier | float(1))) %}
+            {% set ns.count = ns.count + 1 %}
+          {% endif %}
+        {% endfor %}
+        {{ (ns.sum / ns.count) if ns.count > 0 else 0 }}
+
+      valve_min: >-
+        {% set ns = namespace(values=[]) %}
+        {% for e in expand(valve_entities) %}
+          {% if e.state not in ['unknown', 'unavailable', 'none', ''] %}
+            {% set ns.values = ns.values + [((e.state | float(0)) * (valve_multiplier | float(1)))] %}
+          {% endif %}
+        {% endfor %}
+        {{ (ns.values | min) if (ns.values | count) > 0 else 0 }}
+
+      window_open_count: >-
+        {% set ns = namespace(count=0) %}
+        {% for e in expand(window_entities) %}
+          {% if e.state in ['on', 'open'] %}
+            {% set ns.count = ns.count + 1 %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.count }}
+
+  # 3) Potreba tepla
+  - variables:
+      temp_error: "{{ (target_temp | float(0)) - (room_temp | float(0)) }}"
+
+  - variables:
+      raw_heat_need: >-
+        {% set err = temp_error | float(0) %}
+        {% set valve = valve_avg | float(0) %}
+        {% if hvac_mode == 'off' or (window_open_count | int(0)) > 0 or (target_temp | float(0)) <= 5 %}
+          0
+        {% elif err <= -0.30 %}
+          0
+        {% elif err >= 1.50 %}
+          100
+        {% else %}
+          {% set temp_component = [ [((err + 0.20) / 1.70 * 100), 0] | max, 100 ] | min %}
+          {% set result = 0.70 * temp_component + 0.30 * valve %}
+          {{ [ [result, 0] | max, 100 ] | min }}
+        {% endif %}
+
+  - variables:
+      heat_need: >-
+        {% set weighted = (raw_heat_need | float(0)) * (room_weight | float(1)) %}
+        {{ [ [weighted, 0] | max, 100 ] | min }}
+
+  # 4) Voliteľné fyzikálne vstupy
+  - variables:
+      supply_temp: >-
+        {% if supply_entity not in ['', none] and has_value(supply_entity) %}
+          {{ states(supply_entity) | float(0) }}
+        {% else %}
+          {{ none }}
+        {% endif %}
+      return_temp: >-
+        {% if return_entity not in ['', none] and has_value(return_entity) %}
+          {{ states(return_entity) | float(0) }}
+        {% else %}
+          {{ none }}
+        {% endif %}
+      trend_available: "{{ trend_entity not in ['', none] and has_value(trend_entity) }}"
+      room_trend: >-
+        {% if trend_entity not in ['', none] and has_value(trend_entity) %}
+          {{ states(trend_entity) | float(0) }}
+        {% else %}
+          0
+        {% endif %}
+      ref_dt: >-
+        {{ ((((ref_supply | float(0)) + (ref_return | float(0))) / 2) - (ref_room | float(0))) }}
+
+  - variables:
+      current_dt: >-
+        {% if supply_temp is not none and return_temp is not none %}
+          {{ ((((supply_temp | float(0)) + (return_temp | float(0))) / 2) - (room_temp | float(0))) }}
+        {% else %}
+          0
+        {% endif %}
+
+  - variables:
+      radiator_output_now: >-
+        {% if (radiator_qn | float(0)) > 0 and (ref_dt | float(0)) > 0 and (current_dt | float(0)) > 0 %}
+          {{ (radiator_qn | float(0)) * (((current_dt | float(0)) / (ref_dt | float(1))) ** (radiator_n | float(1.3))) }}
+        {% else %}
+          0
+        {% endif %}
+      learning_sample_wk: >-
+        {% set io = (room_temp | float(0)) - (outside_temp | float(0)) %}
+        {% if io > 0 %}
+          {{ (radiator_output_now | float(0)) / io }}
+        {% else %}
+          0
+        {% endif %}
+
+  # Učíme maximálne raz za 5 minút, nie pri každom pohybe ventilu.
+  - variables:
+      learning_valid: >-
+        {% set periodic_ok = trigger.id == 'periodic' %}
+        {% set water_ok = supply_temp is not none and return_temp is not none
+             and (supply_temp | float(0)) > ((return_temp | float(0)) + 2)
+             and (current_dt | float(0)) > 5 %}
+        {% set trend_ok = (not trend_available) or ((room_trend | float(0) | abs) <= (stable_trend_limit | float(0.1))) %}
+        {% set night_ok = (not night_only) or is_state('sun.sun', 'below_horizon') %}
+        {% set hvac_ok = hvac_mode != 'off' and (target_temp | float(0)) > 5 %}
+        {% set valve_ok = (valve_min | float(0)) >= (valve_learning_threshold | float(85)) %}
+        {% set window_ok = (window_open_count | int(0)) == 0 %}
+        {% set delta_ok = ((room_temp | float(0)) - (outside_temp | float(0))) >= (min_io_delta | float(10)) %}
+        {% set radiator_ok = (radiator_qn | float(0)) > 0 and (ref_dt | float(0)) > 0 %}
+        {{ periodic_ok and water_ok and trend_ok and night_ok and hvac_ok and valve_ok and window_ok and delta_ok and radiator_ok }}
+
+  # 5) Naučené W/K a dôvera
+  - variables:
+      learned_wk: >-
+        {% if learning_valid and (learning_sample_wk | float(0)) > 0 %}
+          {% if (old_wk | float(0)) <= 0 %}
+            {{ learning_sample_wk | float(0) }}
+          {% else %}
+            {{ (1 - (learning_alpha | float(0.05))) * (old_wk | float(0)) + (learning_alpha | float(0.05)) * (learning_sample_wk | float(0)) }}
+          {% endif %}
+        {% else %}
+          {{ old_wk | float(0) }}
+        {% endif %}
+      new_confidence: >-
+        {% if learning_valid and (learning_sample_wk | float(0)) > 0 %}
+          {{ [((old_confidence | float(0)) + (confidence_step | float(0.5))), 100] | min }}
+        {% else %}
+          {{ old_confidence | float(0) }}
+        {% endif %}
+
+  # 6) Potrebný výkon a potrebná teplota prívodu
+  - variables:
+      heat_loss_at_target: >-
+        {% set io_target = (target_temp | float(0)) - (outside_temp | float(0)) %}
+        {% if (learned_wk | float(0)) > 0 and io_target > 0 %}
+          {{ (learned_wk | float(0)) * io_target }}
+        {% else %}
+          0
+        {% endif %}
+      recovery_factor: >-
+        {% set err = [temp_error | float(0), 0] | max %}
+        {{ 1 + [err * (recovery_boost_per_c | float(0.15)), (max_recovery_boost | float(0.35))] | min }}
+
+  - variables:
+      requested_radiator_output: "{{ (heat_loss_at_target | float(0)) * (recovery_factor | float(1)) }}"
+
+  - variables:
+      required_supply: >-
+        {% if (requested_radiator_output | float(0)) > 0 and (radiator_qn | float(0)) > 0 and (ref_dt | float(0)) > 0 %}
+          {% set ratio = (requested_radiator_output | float(0)) / (radiator_qn | float(1)) %}
+          {% set required_dt = (ref_dt | float(0)) * (ratio ** (1 / (radiator_n | float(1.3)))) %}
+          {% set mean_water = (target_temp | float(0)) + required_dt %}
+          {% set supply = mean_water + ((assumed_water_dt | float(10)) / 2) %}
+          {{ [ [supply, 20] | max, 80 ] | min }}
+        {% else %}
+          0
+        {% endif %}
+
+  # 7) Zápis výsledkov
+  - action: input_number.set_value
+    target:
+      entity_id: !input heat_need_helper
+    data:
+      value: "{{ heat_need | float(0) | round(1) }}"
+
+  - action: input_number.set_value
+    target:
+      entity_id: !input heat_loss_wk_helper
+    data:
+      value: "{{ learned_wk | float(0) | round(2) }}"
+
+  - action: input_number.set_value
+    target:
+      entity_id: !input confidence_helper
+    data:
+      value: "{{ new_confidence | float(0) | round(1) }}"
+
+  - action: input_number.set_value
+    target:
+      entity_id: !input required_supply_helper
+    data:
+      value: "{{ required_supply | float(0) | round(1) }}"
+
+mode: restart
+max_exceeded: silent
