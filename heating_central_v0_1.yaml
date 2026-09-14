@@ -1,0 +1,155 @@
+# Home Assistant package; load through homeassistant.packages.
+input_boolean:
+  heating_central_enabled:
+    name: Kúrenie centrálne riadenie
+    icon: mdi:radiator
+  heating_simulation_enabled:
+    name: Kúrenie simulácia požiadavky obývačky
+    icon: mdi:test-tube
+    initial: false
+
+input_number:
+  heating_simulated_demand:
+    name: Kúrenie simulovaná požiadavka obývačky
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 0
+  heating_effective_demand:
+    name: Kúrenie vyhodnotená požiadavka
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+  heating_flow_target:
+    name: Kúrenie vypočítaná teplota vody
+    min: 0
+    max: 60
+    step: 1
+    unit_of_measurement: "°C"
+
+automation:
+  - id: heating_central_v0_1
+    alias: Kotol - Centrálne riadenie miestností v0.1
+    description: Požiadavka izieb povoľuje ekvitermiku; simulácia nahrádza požiadavku obývačky.
+    mode: restart
+    variables:
+      # Ďalšie izby pridaj sem. Polohy ventilov sú v percentách 0–100.
+      rooms:
+        - name: Obývačka
+          demand: input_number.obyvacka_potreba_tepla_0_100
+          temperature: sensor.senzor_obyvacka_air_temperature
+          pid: number.pid_obyvacka
+          simulate: true
+          valves:
+            - number.trv1_valve_position
+            - number.trv2_valve_position
+          windows: []
+      watched_entities: >-
+        {% set ns = namespace(ids=[
+          'input_boolean.heating_central_enabled',
+          'input_boolean.heating_simulation_enabled',
+          'input_number.heating_simulated_demand',
+          'sensor.ekvitermika_pozadovana_teplota_vody',
+          'sensor.boiler_outdoortemp']) %}
+        {% for room in rooms %}
+          {% set ns.ids = ns.ids + [room.demand, room.temperature]
+             + room.valves + room.windows %}
+          {% if room.get('pid') %}
+            {% set ns.ids = ns.ids + [room.pid] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.ids }}
+    triggers:
+      - trigger: time_pattern
+        minutes: "/1"
+        id: refresh
+      - trigger: homeassistant
+        event: start
+        id: startup
+      - trigger: state
+        entity_id: binary_sensor.boiler_dhw_charging
+        from: "on"
+        to: "off"
+        id: dhw_finished
+      - trigger: event
+        event_type: state_changed
+        id: inputs
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger is not defined or trigger.id != 'inputs'
+             or trigger.event.data.entity_id in watched_entities }}
+    actions:
+      - variables:
+          effective_demand: >-
+            {% set ns = namespace(demand=0.0) %}
+            {% for room in rooms %}
+              {% set rv = namespace(open=false, window=false) %}
+              {% for valve in room.valves %}
+                {% set position = states(valve) %}
+                {% if is_number(position) and position | float > 0.5 %}
+                  {% set rv.open = true %}
+                {% endif %}
+              {% endfor %}
+              {% for window in room.windows %}
+                {% if not is_state(window, 'off') %}
+                  {% set rv.window = true %}
+                {% endif %}
+              {% endfor %}
+              {% set simulated = room.get('simulate', false)
+                 and is_state('input_boolean.heating_simulation_enabled', 'on') %}
+              {% set demand = states('input_number.heating_simulated_demand')
+                 if simulated else states(room.demand) %}
+              {% set pid_ok = not room.get('pid') or
+                 (is_number(states(room.pid)) and
+                  state_attr(room.pid, 'pid_enable') == true) %}
+              {% if rv.open and not rv.window and pid_ok
+                    and is_number(states(room.temperature)) and is_number(demand) %}
+                {% set ns.demand = [ns.demand, [0, [demand | float, 100] | min] | max] | max %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.demand | round(1) }}
+      - variables:
+          flow_target: >-
+            {% set curve = states('sensor.ekvitermika_pozadovana_teplota_vody') %}
+            {% set outside = states('sensor.boiler_outdoortemp') %}
+            {% if is_state('input_boolean.heating_central_enabled', 'on')
+                  and effective_demand | float(0) >= 5
+                  and is_number(curve) and is_number(outside)
+                  and outside | float < 17 and curve | float >= 30 %}
+              {{ [30, [curve | float, 60] | min] | max | round(0) | int }}
+            {% else %}
+              0
+            {% endif %}
+      # Diagnostické pomocníky: ručné zmeny nie sú vstupom regulácie.
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.heating_effective_demand
+        data:
+          value: "{{ effective_demand }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.heating_flow_target
+        data:
+          value: "{{ flow_target }}"
+      - condition: template
+        value_template: "{{ is_number(states('number.boiler_selflowtemp')) }}"
+      - choose:
+          - conditions: "{{ flow_target | float(0) >= 30 }}"
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.boiler_heatingactivated
+              - action: number.set_value
+                target:
+                  entity_id: number.boiler_selflowtemp
+                data:
+                  value: "{{ flow_target }}"
+        default:
+          - action: number.set_value
+            target:
+              entity_id: number.boiler_selflowtemp
+            data:
+              value: 0
